@@ -1,0 +1,55 @@
+name: cliplink
+description: "剪链 ClipLink - 局域网跨设备文本与图片剪贴板"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  material_ui: ^1.11.1
+  super_clipboard: ^0.9.1
+  cryptography: ^2.9.0
+  crypto: ^3.0.7
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  collection: ^1.19.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: Manrope
+      fonts:
+        - asset: assets/fonts/Manrope-VariableFont_wght.ttf
+          weight: 400
+        - asset: assets/fonts/Manrope-VariableFont_wght.ttf
+          weight: 500
+        - asset: assets/fonts/Manrope-VariableFont_wght.ttf
+          weight: 600
+        - asset: assets/fonts/Manrope-VariableFont_wght.ttf
+          weight: 700
+        - asset: assets/fonts/Manrope-VariableFont_wght.ttf
+          weight: 800
+
+flutter_launcher_icons:
+  image_path: assets/branding/app_icon.png
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  macos:
+    generate: true
+    image_path: assets/branding/app_icon.png
+  windows:
+    generate: true
+    image_path: assets/branding/app_icon.png
+    icon_size: 256
+  adaptive_icon_background: "#10231D"
+  adaptive_icon_foreground: assets/branding/app_icon_foreground.png

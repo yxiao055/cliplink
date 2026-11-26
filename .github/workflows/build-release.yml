@@ -1,0 +1,213 @@
+name: Build installers
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: installers-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: '3.50.1'
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Package Windows zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath artifacts/ClipLink-Windows-x64.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipLink-Windows
+          path: artifacts/ClipLink-Windows-x64.zip
+          if-no-files-found: error
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install Android toolchain
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" \
+            "ndk;28.2.13676358" "cmake;3.22.1"
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Apply Gradle 9 / CargoKit compatibility patch
+        run: python3 scripts/android_gradle9_compat.py
+
+      - name: Build Android release
+        run: flutter build apk --release
+
+      - name: Verify APK contains native libraries
+        run: python3 scripts/verify_android_apk.py build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Package Android artifact
+        run: |
+          mkdir -p artifacts
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            artifacts/ClipLink-Android-universal.apk
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipLink-Android
+          path: artifacts/ClipLink-Android-universal.apk
+          if-no-files-found: error
+
+  macos:
+    name: macOS (unsigned)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Build macOS release
+        run: flutter build macos --release
+
+      - name: Package macOS app
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          APP=$(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app' | head -n 1)
+          test -n "$APP"
+          ARCH=$(uname -m)
+          ditto -c -k --sequesterRsrc --keepParent "$APP" \
+            "artifacts/ClipLink-macOS-${ARCH}-unsigned.zip"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipLink-macOS
+          path: artifacts/ClipLink-macOS-*.zip
+          if-no-files-found: error
+
+  ios:
+    name: iOS (unsigned, developer signing required)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Build iOS release without signing
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          mkdir -p artifacts Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry artifacts/ClipLink-iOS-unsigned.ipa Payload
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipLink-iOS
+          path: artifacts/ClipLink-iOS-unsigned.ipa
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, android, macos, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify assets
+        run: |
+          ls -lah release-assets
+          test -f release-assets/ClipLink-Windows-x64.zip
+          test -f release-assets/ClipLink-Android-universal.apk
+          test -f release-assets/ClipLink-iOS-unsigned.ipa
+          ls release-assets/ClipLink-macOS-*.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          body: |
+            ## 剪链 ClipLink ${{ github.ref_name }}
+
+            | 平台 | 安装包 | 说明 |
+            | --- | --- | --- |
+            | Windows | `ClipLink-Windows-x64.zip` | 解压后运行 `cliplink.exe`；构建未签名 |
+            | Android | `ClipLink-Android-universal.apk` | 测试签名；先卸载旧版本再安装 |
+            | macOS | `ClipLink-macOS-*-unsigned.zip` | Apple Silicon/Intel 取决于构建机；未签名 |
+            | iOS | `ClipLink-iOS-unsigned.ipa` | 未签名，需要自己的开发者证书重签 |
+
+            手机端受系统限制：Android 仅应用前台可读取剪贴板；iOS 需要在应用内点按同步并可能触发系统粘贴确认。
+            模拟器运行在 NAT 后时，Windows 无法主动连接模拟器，请参考项目 README 的「Windows 与安卓模拟器配对超时」。

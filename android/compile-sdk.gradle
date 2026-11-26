@@ -1,0 +1,16 @@
+// The 0.9.x super_native_extensions Android plugin still declares
+// compileSdkVersion 31, while its AndroidX dependencies require API 34+.
+// Raise compileSdk for all Android library subprojects (including plugins)
+// so AGP's AAR metadata check passes with the Flutter 3.50 toolchain.
+subprojects {
+    afterEvaluate { project ->
+        def android = project.extensions.findByName('android')
+        if (android != null) {
+            try {
+                android.compileSdkVersion 36
+            } catch (ignored) {
+                // Ignore projects using an incompatible new AGP DSL.
+            }
+        }
+    }
+}
